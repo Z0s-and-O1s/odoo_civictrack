@@ -20,7 +20,9 @@ class Issue(db.Model):
     lat = db.Column(db.Float, nullable=False)
     lng = db.Column(db.Float, nullable=False)
     images = db.Column(db.Text)
-    status = db.Column(db.String(20), default='Reported')  # ✅ New field
+    status = db.Column(db.String(20), default='Reported')
+    spam_count = db.Column(db.Integer, default=0)
+    escalated = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ✅ CREATE DATABASE TABLES
@@ -74,7 +76,7 @@ def report():
 
 @app.route('/map')
 def show_map():
-    issues = Issue.query.all()
+    issues = Issue.query.filter(Issue.spam_count < 3).all()
     issue_data = []
     for i in issues:
         issue_data.append({
@@ -85,6 +87,7 @@ def show_map():
             "lat": i.lat,
             "lng": i.lng,
             "images": i.images,
+            "escalated": i.escalated,
             "status": i.status
         })
     return render_template('map.html', issues=issue_data)
@@ -97,6 +100,24 @@ def update_status(issue_id):
     issue.status = new_status
     db.session.commit()
     return jsonify({"message": "Status updated"})
+
+@app.route('/report_spam/<int:issue_id>', methods=['POST'])
+def report_spam(issue_id):
+    issue = Issue.query.get_or_404(issue_id)
+    issue.spam_count += 1
+    db.session.commit()
+    return jsonify({"message": "Spam reported", "count": issue.spam_count})
+
+@app.route('/run_escalation')
+def run_escalation():
+    one_week_ago = datetime.utcnow() - timedelta(days=7)
+    issues = Issue.query.filter(Issue.created_at <= one_week_ago, Issue.status != 'Resolved', Issue.escalated == False).all()
+
+    for issue in issues:
+        issue.escalated = True
+
+    db.session.commit()
+    return jsonify({"message": f"{len(issues)} issues escalated."})
 
 # ✅ Run app
 if __name__ == '__main__':

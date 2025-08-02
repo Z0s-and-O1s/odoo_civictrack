@@ -4,8 +4,6 @@
   <title>Issue Map</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- Bootstrap & Leaflet CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter&display=swap" rel="stylesheet">
@@ -24,21 +22,6 @@
       border-radius: 12px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.05);
     }
-    .btn-primary {
-      background-color: #3F51B5;
-      border: none;
-      transition: 0.3s;
-    }
-    .btn-primary:hover {
-      background-color: #303F9F;
-    }
-    .btn-success {
-      background-color: #00BCD4;
-      border: none;
-    }
-    .btn-success:hover {
-      background-color: #0097A7;
-    }
     #map {
       height: 85vh;
       border-radius: 12px;
@@ -52,7 +35,7 @@
 
   <div class="row mb-3">
     <div class="col-md-4">
-      <label for="filterCategory">Category:</label>
+      <label>Category:</label>
       <select id="filterCategory" class="form-select">
         <option value="all">All</option>
         <option value="roads">Roads</option>
@@ -63,7 +46,7 @@
       </select>
     </div>
     <div class="col-md-4">
-      <label for="filterDistance">Distance:</label>
+      <label>Distance:</label>
       <select id="filterDistance" class="form-select">
         <option value="all">All</option>
         <option value="1">1 km</option>
@@ -71,20 +54,37 @@
         <option value="5">5 km</option>
       </select>
     </div>
+    <div class="col-md-4">
+      <label>Status:</label>
+      <select id="filterStatus" class="form-select">
+        <option value="all">All</option>
+        <option value="Reported">Reported</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Resolved">Resolved</option>
+      </select>
+    </div>
   </div>
 
   <div id="map"></div>
 
-  <!-- JS: Leaflet + Logic -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([20, 80], 5); // Fallback view
-    let userLat = null;
-    let userLng = null;
+    const map = L.map('map').setView([20, 80], 5);
+    let userLat = null, userLng = null;
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
+
+    function manualLocationPrompt() {
+      const lat = prompt("Enter your latitude (e.g. 17.9784):");
+      const lng = prompt("Enter your longitude (e.g. 79.5924):");
+      if (lat && lng) {
+        userLat = parseFloat(lat);
+        userLng = parseFloat(lng);
+        map.setView([userLat, userLng], 14);
+      }
+    }
 
     navigator.geolocation.getCurrentPosition(
       pos => {
@@ -93,17 +93,35 @@
         map.setView([userLat, userLng], 14);
       },
       err => {
-        console.warn("Location unavailable, using default.");
+        alert("Location blocked. You can enter it manually.");
+        manualLocationPrompt();
       }
     );
 
-    const issues = {{ issues|tojson | safe }};
+    const issues = {{ issues | tojson | safe }};
     const markers = [];
 
     issues.forEach(issue => {
+      let iconUrl = '/static/icons/red-marker.png'; // Default
+
+if (issue.status === 'In Progress') iconUrl = '/static/icons/orange-marker.png';
+if (issue.status === 'Resolved') iconUrl = '/static/icons/green-marker.png';
+if (issue.escalated) iconUrl = '/static/icons/blue-marker.png';
+if (issue.escalated && issue.status === 'Resolved') iconUrl = '/static/icons/green-marker.png';
+
+
+      const markerIcon = L.icon({
+        iconUrl: iconUrl,
+        iconSize: [30, 30],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+      });
+
       const popup = `
         <strong>${issue.title}</strong><br>
         <em>${issue.category}</em><br>
+        ${issue.escalated ? "<b style='color: red;'>⚠️ Escalated!</b><br>" : ""}
         <b>Status:</b> <span id="status-${issue.id}">${issue.status}</span><br>
         ${issue.description}<br>
         ${issue.images ? `<img src="/static/uploads/${issue.images.split(',')[0]}" width="100"/>` : ''}
@@ -116,11 +134,12 @@
         </select>
       `;
 
-      const marker = L.marker([issue.lat, issue.lng])
+      const marker = L.marker([issue.lat, issue.lng], { icon: markerIcon })
         .addTo(map)
         .bindPopup(popup);
 
       marker.issueCategory = issue.category;
+      marker.issueStatus = issue.status;
       markers.push(marker);
     });
 
@@ -129,9 +148,9 @@
       const R = 6371;
       const dLat = toRad(lat2 - lat1);
       const dLng = toRad(lng2 - lng1);
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      const a = Math.sin(dLat / 2) ** 2 +
                 Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-                Math.sin(dLng / 2) * Math.sin(dLng / 2);
+                Math.sin(dLng / 2) ** 2;
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     }
@@ -139,17 +158,19 @@
     function applyFilters() {
       const selectedCategory = document.getElementById('filterCategory').value;
       const selectedDistance = document.getElementById('filterDistance').value;
+      const selectedStatus = document.getElementById('filterStatus').value;
 
       markers.forEach(marker => {
-        const categoryMatch = selectedCategory === 'all' || marker.issueCategory === selectedCategory;
+        const catMatch = selectedCategory === 'all' || marker.issueCategory === selectedCategory;
+        const statMatch = selectedStatus === 'all' || marker.issueStatus === selectedStatus;
 
-        let distanceMatch = true;
+        let distMatch = true;
         if (selectedDistance !== 'all' && userLat && userLng) {
           const d = calculateDistance(userLat, userLng, marker.getLatLng().lat, marker.getLatLng().lng);
-          distanceMatch = d <= parseInt(selectedDistance);
+          distMatch = d <= parseInt(selectedDistance);
         }
 
-        if (categoryMatch && distanceMatch) {
+        if (catMatch && statMatch && distMatch) {
           map.addLayer(marker);
         } else {
           map.removeLayer(marker);
@@ -164,14 +185,26 @@
         body: JSON.stringify({ status: newStatus })
       })
       .then(res => res.json())
-      .then(data => {
+      .then(() => {
         document.getElementById(`status-${id}`).textContent = newStatus;
         alert("Status updated!");
+        location.reload();
+      });
+    }
+
+    function reportSpam(id) {
+      if (!confirm("Are you sure you want to report this issue as spam?")) return;
+      fetch(`/report_spam/${id}`, { method: 'POST' })
+      .then(res => res.json())
+      .then(() => {
+        alert("Spam reported! Refreshing map...");
+        location.reload();
       });
     }
 
     document.getElementById('filterCategory').addEventListener('change', applyFilters);
     document.getElementById('filterDistance').addEventListener('change', applyFilters);
+    document.getElementById('filterStatus').addEventListener('change', applyFilters);
   </script>
 </body>
 </html>
