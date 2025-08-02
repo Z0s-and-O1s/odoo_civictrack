@@ -77,7 +77,23 @@
 </head>
 <body class="p-4">
   <h2>📍 Reported Issues Around You</h2>
-  <div id="map"></div>
+
+<div class="row mb-3">
+  <div class="col-md-4">
+    <label for="filterCategory">Filter by Category:</label>
+    <select id="filterCategory" class="form-select">
+      <option value="all">All</option>
+      <option value="roads">Roads</option>
+      <option value="lighting">Lighting</option>
+      <option value="water">Water</option>
+      <option value="cleanliness">Cleanliness</option>
+      <option value="safety">Safety</option>
+    </select>
+  </div>
+</div>
+
+<div id="map"></div>
+
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -100,15 +116,37 @@ navigator.geolocation.getCurrentPosition(
     }).addTo(map);
 
     const issues = {{ issues|tojson | safe }};
-    issues.forEach(issue => {
-      const popup = `
-        <strong>${issue.title}</strong><br>
-        <em>${issue.category}</em><br>
-        ${issue.description}<br>
-        ${issue.images ? `<img src="/static/uploads/${issue.images.split(',')[0]}" width="100"/>` : ''}
-      `;
-      L.marker([issue.lat, issue.lng]).addTo(map).bindPopup(popup);
-    });
+    const markers = [];
+
+issues.forEach(issue => {
+  const popup = `
+    <strong>${issue.title}</strong><br>
+    <em>${issue.category}</em><br>
+    ${issue.description}<br>
+    ${issue.images ? `<img src="/static/uploads/${issue.images.split(',')[0]}" width="100"/>` : ''}
+  `;
+
+  const marker = L.marker([issue.lat, issue.lng])
+    .addTo(map)
+    .bindPopup(popup);
+
+  marker.issueCategory = issue.category;
+  markers.push(marker);
+});
+
+document.getElementById('filterCategory').addEventListener('change', function () {
+  const selected = this.value;
+
+  markers.forEach(marker => {
+    const category = marker.issueCategory;
+    if (selected === 'all' || category === selected) {
+      map.addLayer(marker);
+    } else {
+      map.removeLayer(marker);
+    }
+  });
+});
+
   </script>
 </body>
 </html>
