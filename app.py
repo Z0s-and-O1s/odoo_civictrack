@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
@@ -19,14 +19,16 @@ class Issue(db.Model):
     category = db.Column(db.String(50), nullable=False)
     lat = db.Column(db.Float, nullable=False)
     lng = db.Column(db.Float, nullable=False)
-    images = db.Column(db.Text)  # Comma-separated filenames
+    images = db.Column(db.Text)
+    status = db.Column(db.String(20), default='Reported')  # ✅ New field
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# CREATE DATABASE TABLES
+# ✅ CREATE DATABASE TABLES
 with app.app_context():
     db.create_all()
 
 # ROUTES
+
 @app.route('/')
 def home():
     return render_template('index.html')
@@ -40,14 +42,13 @@ def report():
         lat = request.form['lat']
         lng = request.form['lng']
 
-        # Location check
         try:
             lat = float(lat)
             lng = float(lng)
         except ValueError:
             return "Location access failed. Please allow GPS in your browser.", 400
 
-        # Handle image files
+        # Handle image upload
         files = request.files.getlist('images')
         filenames = []
         for file in files:
@@ -56,6 +57,7 @@ def report():
                 file.save(filepath)
                 filenames.append(file.filename)
 
+        # Save issue
         issue = Issue(
             title=title,
             description=desc,
@@ -66,7 +68,6 @@ def report():
         )
         db.session.add(issue)
         db.session.commit()
-
         return redirect(url_for('home'))
 
     return render_template('report.html')
@@ -74,21 +75,29 @@ def report():
 @app.route('/map')
 def show_map():
     issues = Issue.query.all()
-
-    # Convert issues to plain JSON-serializable dicts
     issue_data = []
     for i in issues:
         issue_data.append({
+            "id": i.id,
             "title": i.title,
             "description": i.description,
             "category": i.category,
             "lat": i.lat,
             "lng": i.lng,
-            "images": i.images
+            "images": i.images,
+            "status": i.status
         })
-
     return render_template('map.html', issues=issue_data)
 
+@app.route('/update_status/<int:issue_id>', methods=['POST'])
+def update_status(issue_id):
+    data = request.get_json()
+    new_status = data['status']
+    issue = Issue.query.get_or_404(issue_id)
+    issue.status = new_status
+    db.session.commit()
+    return jsonify({"message": "Status updated"})
 
+# ✅ Run app
 if __name__ == '__main__':
     app.run(debug=True)
